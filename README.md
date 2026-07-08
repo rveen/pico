@@ -20,6 +20,7 @@ dnf install arm-none-eabi-gcc-cs arm-none-eabi-gcc-cs-c++ arm-none-eabi-newlib
 # Build examples
 
 ```
+export PICO_SDK_PATH=/SOMEDIR/pico-sdk
 cd pico-examples
 mkdir build
 cd build
