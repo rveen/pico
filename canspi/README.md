@@ -15,4 +15,4 @@ make -j4
 
 Hold down the BOOTSEL button on the Pico board while plugging in your device using a micro-USB cable to force it into USB
 Mass Storage Mode. Copy canspi.uf2 file onto the board to program the flash. In linux the board will appear in the
-/run/media/root/ directory (if logged in as root).
+/run/media/root/ directory (if logged in as root). Do a 'sync' operation to flush the write operation.
