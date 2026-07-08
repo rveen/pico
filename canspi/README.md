@@ -1,5 +1,9 @@
 # CAN / SPI interface
 
+A bare-metal firmware project for the Raspberry Pi Pico (RP2040) that drives an MCP2518FD CAN-FD controller over SPI in classic-CAN mode, and prints received frames over the USB CDC serial console. Built directly on the Pico C SDK (no RTOS).
+
+The hardware details are available in canspi-hw/.
+
 ## Build
 
 ```
