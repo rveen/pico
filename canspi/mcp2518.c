@@ -33,11 +33,24 @@
 
 #define C1FIFOUA1       0x064U
 
+// FIFO 2 is the transmit FIFO. Same register layout as FIFO 1, just at the
+// next FIFO's address (each FIFO's CON/STA/UA registers are 12 bytes apart).
+#define C1FIFOCON2      0x068U
+#define C1FIFOCON2_TXEN     (1U << 7)
+#define C1FIFOCON2_UINC     (1U << 8)
+#define C1FIFOCON2_TXREQ    (1U << 9)
+#define C1FIFOCON2_FSIZE(n) (((n) & 0x1FU) << 24)
+
+#define C1FIFOSTA2      0x06CU
+#define C1FIFOSTA2_TFNRFNIF (1U << 0)   // FIFO not full
+
+#define C1FIFOUA2       0x070U
+
 #define C1FLTCON0       0x1D0U   // byte 0 of this word controls filter 0
 #define C1FLTOBJ0       0x1F0U
 #define C1MASK0         0x1F4U
 
-#define RX_RAM_BASE     0x400U   // RX/TX message RAM window starts here
+#define MSG_RAM_BASE    0x400U   // RX/TX message RAM window starts here
 
 // ---------------------------------------------------------------------------
 // Low level SPI transactions (MCP2518FD SPI command format: 4-bit opcode in
@@ -92,6 +105,17 @@ static void read_bytes(uint16_t addr, uint8_t *dst, size_t n) {
     can_cs_select();
     spi_write_blocking(CAN_SPI_PORT, cmd, sizeof(cmd));
     spi_read_blocking(CAN_SPI_PORT, 0x00, dst, n);
+    can_cs_deselect();
+}
+
+static void write_bytes(uint16_t addr, const uint8_t *src, size_t n) {
+    uint8_t cmd[2];
+    cmd[0] = (uint8_t)(SPI_CMD_WRITE << 4) | ((addr >> 8) & 0x0FU);
+    cmd[1] = (uint8_t)(addr & 0xFFU);
+
+    can_cs_select();
+    spi_write_blocking(CAN_SPI_PORT, cmd, sizeof(cmd));
+    spi_write_blocking(CAN_SPI_PORT, src, n);
     can_cs_deselect();
 }
 
@@ -177,6 +201,10 @@ bool can_setup_controller(can_bitrate_t bitrate, can_mode_t mode) {
     // over SPI rather than using the MCP2518FD's INT pin.
     write_word(C1FIFOCON1, C1FIFOCON1_FSIZE(7));
 
+    // FIFO 2 is the transmit FIFO, 8 messages deep, enabled via TXEN. Loaded
+    // and kicked off by can_write_message().
+    write_word(C1FIFOCON2, C1FIFOCON2_TXEN | C1FIFOCON2_FSIZE(7));
+
     // Filter 0: match every ID (mask = 0) and route hits to FIFO 1.
     write_word(C1FLTOBJ0, 0);
     write_word(C1MASK0, 0);
@@ -201,7 +229,7 @@ bool can_read_message(can_frame_t *frame) {
         return false;   // FIFO empty
     }
 
-    uint16_t addr = (uint16_t)read_word(C1FIFOUA1) + RX_RAM_BASE;
+    uint16_t addr = (uint16_t)read_word(C1FIFOUA1) + MSG_RAM_BASE;
 
     uint8_t hdr[8];
     read_bytes(addr, hdr, sizeof(hdr));
@@ -236,6 +264,53 @@ bool can_read_message(can_frame_t *frame) {
 
     // Tell the controller we've taken the message so it can advance the FIFO.
     write_word(C1FIFOCON1, C1FIFOCON1_UINC);
+
+    return true;
+}
+
+bool can_write_message(const can_frame_t *frame) {
+    uint32_t sta = read_word(C1FIFOSTA2);
+    if (!(sta & C1FIFOSTA2_TFNRFNIF)) {
+        return false;   // FIFO full
+    }
+
+    uint16_t addr = (uint16_t)read_word(C1FIFOUA2) + MSG_RAM_BASE;
+
+    // Inverse of the ID decode in can_read_message(): SID occupies bits
+    // 10:0 of R0, EID occupies bits 28:11.
+    uint32_t raw;
+    if (frame->extended) {
+        uint32_t sid = (frame->id >> 18) & 0x7FFU;
+        uint32_t eid = frame->id & 0x3FFFFU;
+        raw = sid | (eid << 11);
+    } else {
+        raw = frame->id & 0x7FFU;
+    }
+
+    uint8_t dlc = (frame->dlc > 8U) ? 8U : frame->dlc;
+    uint32_t r1 = dlc | (frame->remote ? (1U << 5) : 0U) | (frame->extended ? (1U << 4) : 0U);
+
+    uint8_t hdr[8];
+    hdr[0] = (uint8_t)(raw & 0xFFU);
+    hdr[1] = (uint8_t)((raw >> 8) & 0xFFU);
+    hdr[2] = (uint8_t)((raw >> 16) & 0xFFU);
+    hdr[3] = (uint8_t)((raw >> 24) & 0xFFU);
+    hdr[4] = (uint8_t)(r1 & 0xFFU);
+    hdr[5] = (uint8_t)((r1 >> 8) & 0xFFU);
+    hdr[6] = (uint8_t)((r1 >> 16) & 0xFFU);
+    hdr[7] = (uint8_t)((r1 >> 24) & 0xFFU);
+    write_bytes(addr, hdr, sizeof(hdr));
+
+    if (dlc > 0) {
+        write_bytes(addr + 8U, frame->data, dlc);
+    }
+
+    // UINC (advance the FIFO head) and TXREQ (request transmission) must be
+    // set together in the same write. This register also holds the static
+    // TXEN/FSIZE config from can_setup_controller(), so read-modify-write it
+    // rather than clobbering those bits.
+    uint32_t con = read_word(C1FIFOCON2);
+    write_word(C1FIFOCON2, con | C1FIFOCON2_UINC | C1FIFOCON2_TXREQ);
 
     return true;
 }

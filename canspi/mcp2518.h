@@ -59,4 +59,9 @@ bool can_setup_controller(can_bitrate_t bitrate, can_mode_t mode);
 // blocks, so it is safe to call in a tight loop.
 bool can_read_message(can_frame_t *frame);
 
+// Queues a frame on the transmit FIFO for sending. Returns true if the frame
+// was loaded and transmission requested, false if the TX FIFO is full (the
+// caller should retry). This call never blocks.
+bool can_write_message(const can_frame_t *frame);
+
 #endif
