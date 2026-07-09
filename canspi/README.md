@@ -19,4 +19,4 @@ make -j4
 
 Hold down the BOOTSEL button on the Pico board while plugging in your device using a micro-USB cable to force it into USB
 Mass Storage Mode. Copy build/canread.uf2 file onto the board to program the flash. In linux the board will appear as
-/run/media/root/RPI-RP2 (if logged in as root, taht is). Do a 'sync' operation to flush the write operation.
+/run/media/root/RPI-RP2 (if logged in as root, that is). Do a 'sync' operation to flush the write operation.
